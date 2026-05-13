@@ -32,4 +32,10 @@ const dataSource = await Cesium.GeoJsonDataSource.load(resource);
     2. Surface Water
 const resource = await Cesium.IonResource.fromAssetId(4772293);
 const dataSource = await Cesium.GeoJsonDataSource.load(resource);
+
+Better optimised River and Surface Water Flooding GeoJSON Files:
+
+ID: 4773439	RiverWaterGJSON	GeoJSON	May 13 2026 2:44 PM	348.7 KiB	AndrewGoodsell2	
+ID: 4773433	SurfaceWaterGJSON	GeoJSON	May 13 2026 2:43 PM	10.98 MiB	AndrewGoodsell2
+
 ______________________________
