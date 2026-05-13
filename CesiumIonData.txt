@@ -37,5 +37,17 @@ Better optimised River and Surface Water Flooding GeoJSON Files:
 
 ID: 4773439	RiverWaterGJSON	GeoJSON	May 13 2026 2:44 PM	348.7 KiB	AndrewGoodsell2	
 ID: 4773433	SurfaceWaterGJSON	GeoJSON	May 13 2026 2:43 PM	10.98 MiB	AndrewGoodsell2
+______________________________
 
+Flooding 3D Tiles
+
+    1. River Flooding
+const tileset = viewer.scene.primitives.add(
+  await Cesium.Cesium3DTileset.fromIonAssetId(4774410),
+);
+
+    2. Surface Water
+const tileset = viewer.scene.primitives.add(
+  await Cesium.Cesium3DTileset.fromIonAssetId(4774263),
+);
 ______________________________
