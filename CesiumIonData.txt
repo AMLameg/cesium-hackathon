@@ -22,3 +22,14 @@ const entity = viewer.entities.add({
   model: { uri: resource },
 });
 ______________________________
+
+Flooding GEOJSON Data from QGIS
+
+    1. River Fooding
+const resource = await Cesium.IonResource.fromAssetId(4772316);
+const dataSource = await Cesium.GeoJsonDataSource.load(resource);
+
+    2. Surface Water
+const resource = await Cesium.IonResource.fromAssetId(4772293);
+const dataSource = await Cesium.GeoJsonDataSource.load(resource);
+______________________________
