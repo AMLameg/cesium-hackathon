@@ -50,4 +50,16 @@ const tileset = viewer.scene.primitives.add(
 const tileset = viewer.scene.primitives.add(
   await Cesium.Cesium3DTileset.fromIonAssetId(4774263),
 );
+
+Flooding 3D Tiles GLTF Format (should be most optimised)
+
+    1. River Flooding
+const tileset = viewer.scene.primitives.add(
+  await Cesium.Cesium3DTileset.fromIonAssetId(4774722),
+);
+
+    2. Surface Water
+const tileset = viewer.scene.primitives.add(
+  await Cesium.Cesium3DTileset.fromIonAssetId(4774719),
+);
 ______________________________
