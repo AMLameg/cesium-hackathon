@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "cesium": "^1.141.0"
+  },
+  "devDependencies": {
+    "vite-plugin-cesium": "^1.2.23"
+  }
+}
