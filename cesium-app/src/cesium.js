@@ -1,3 +1,4 @@
+import { Viewer, GeoJsonDataSource, Color } from 'cesium';
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 
@@ -59,6 +60,17 @@ try {
 } catch (error) {
   console.error("Error loading Cesium content:", error);
 }
+
+
+const roads = await Cesium.GeoJsonDataSource.load('../public/glasgow.geojson', {
+    stroke: Color.RED,
+    strokeWidth: 3,       
+    fill: Color.RED.withAlpha(0.3),     
+    clampToGround: true
+  });
+
+
+await viewer.dataSources.add(roads);
 
 // Fly to Glasgow
 viewer.camera.flyTo({
