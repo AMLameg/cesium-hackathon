@@ -1,3 +1,6 @@
+import * as Cesium from "cesium";
+import * as Helpers from "./Helpers/index.js";
+
 Cesium.Ion.defaultAccessToken =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZjRiNTQ2Ny1jN2M4LTRmZWEtODFkOS0wNzRlZjFjZDY0MGIiLCJpZCI6MzY4NzQzLCJzdWIiOiJBbmRyZXdHb29kc2VsbDIiLCJpc3MiOiJodHRwczovL2lvbi5jZXNpdW0uY29tIiwiYXVkIjoiVW50aXRsZWQiLCJpYXQiOjE3Nzg1OTYyMTN9.2SqfQ7XKDfelcFMfD5avwpw34-tNXhqxvNCQsN7Pghc";
 
@@ -11,13 +14,15 @@ Cesium.Ion.defaultAccessToken =
     terrain: Cesium.Terrain.fromWorldTerrain(),
   });
 
+  Helpers.setViewer(viewer);
+
   const globe = viewer.scene.globe;
 
   const floodColor = Cesium.Color.fromCssColorString("#1CA9FF").withAlpha(0.5);
   const floodLineColor = Cesium.Color.CYAN.withAlpha(0.9);
 
-  const roadColor = Cesium.Color.RED;
-  const roadFillColor = Cesium.Color.RED.withAlpha(0.3);
+  const roadColor = Cesium.Color.RED.withAlpha(0.55);
+  const roadFillColor = Cesium.Color.RED.withAlpha(0.15);
 
   const glasgowDegrees = [
     [-4.35625669612491, 55.8731847589548],
@@ -113,9 +118,7 @@ Cesium.Ion.defaultAccessToken =
     });
   }
 
-  const globeClippingPolygons = createGlasgowClippingPolygons();
-
-  globe.clippingPolygons = globeClippingPolygons;
+  globe.clippingPolygons = createGlasgowClippingPolygons();
   globe.showSkirts = false;
   globe.backFaceCulling = false;
   globe.undergroundColor = undefined;
@@ -128,7 +131,6 @@ Cesium.Ion.defaultAccessToken =
     });
 
     googleTileset.clippingPolygons = createGlasgowClippingPolygons();
-
     viewer.scene.primitives.add(googleTileset);
   } catch (error) {
     console.error("Google Photorealistic 3D Tiles failed:", error);
@@ -165,8 +167,7 @@ Cesium.Ion.defaultAccessToken =
         if (entity.point) {
           entity.point.color = floodColor;
           entity.point.pixelSize = 8;
-          entity.point.heightReference =
-            Cesium.HeightReference.CLAMP_TO_GROUND;
+          entity.point.heightReference = Cesium.HeightReference.CLAMP_TO_GROUND;
         }
       });
 
@@ -182,9 +183,7 @@ Cesium.Ion.defaultAccessToken =
   try {
     const roads = await Cesium.GeoJsonDataSource.load(
       "../public/glasgow.geojson",
-      {
-        clampToGround: true,
-      }
+      { clampToGround: true }
     );
 
     roads.entities.suspendEvents();
@@ -205,7 +204,7 @@ Cesium.Ion.defaultAccessToken =
 
       if (road.polyline) {
         road.polyline.material = roadColor;
-        road.polyline.width = 3;
+        road.polyline.width = 1.5;
         road.polyline.clampToGround = true;
       }
     });
@@ -218,62 +217,67 @@ Cesium.Ion.defaultAccessToken =
     console.error("Error loading roads:", error);
   }
 
+  let chargerCount = 0;
+
   try {
     const response = await fetch("../public/glasgow_chargers.csv");
-    const evcData = await response.text();
 
-    const rows = evcData.split("\n").slice(1);
+    if (!response.ok) {
+      throw new Error(`CSV failed to load: ${response.status}`);
+    }
+
+    const evcData = await response.text();
+    const lines = evcData.trim().split(/\r?\n/);
+
+    const delimiter = lines[0].includes("\t") ? "\t" : ",";
+    const headers = lines[0].split(delimiter).map((h) => h.trim());
+
+    const latIndex = headers.indexOf("latitude");
+    const lonIndex = headers.indexOf("longitude");
+    const idIndex = headers.indexOf("cp_id_str");
+    const powerIndex = headers.indexOf("Power_kW");
+    const connectorIndex = headers.indexOf("connector_id");
+
+    if (latIndex === -1 || lonIndex === -1) {
+      throw new Error("Could not find latitude/longitude columns in CSV");
+    }
+
+    const rows = lines.slice(1);
 
     rows.forEach((row) => {
-      const cols = row.split(",");
+      const cols = row.split(delimiter).map((c) => c.trim());
 
-      if (cols.length < 5) return;
-
-      const lat = parseFloat(cols[0]);
-      const lon = parseFloat(cols[1]);
-      const id = cols[2];
-      const power = cols[3];
-      const connectorId = cols[4];
+      const lat = parseFloat(cols[latIndex]);
+      const lon = parseFloat(cols[lonIndex]);
 
       if (Number.isNaN(lat) || Number.isNaN(lon)) return;
-
       if (!pointInPolygon(lon, lat, glasgowDegrees)) return;
 
-      viewer.entities.add({
-        name: `Charger: ${id}`,
+      const id = cols[idIndex] || "Unknown";
+      const power = cols[powerIndex] || "Unknown";
+      const connectorId = cols[connectorIndex] || "Unknown";
 
-        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+      chargerCount++;
 
-        billboard: {
-          image:
-            "https://cdn-icons-png.flaticon.com/512/5343/5343963.png",
-
-          scale: 0.05,
-
-          scaleByDistance: new Cesium.NearFarScalar(
-            500,
-            0.12,
-            5000,
-            0.04
-          ),
-
-          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      Helpers.Window.create({
+        title: `Charging Status: ${id}`,
+        type: "url",
+        content:
+          "https://grafana.imic.lt/dashboard/snapshot/1Q2uiBJFtAzL1ldGHSoNbx6v9TSSNxMq",
+        marker: {
+          coordinates: {
+            longitude: lon,
+            latitude: lat,
+            height: 0,
+          },
+          color: "#cfca3a",
+          style: "car",
+          showWindowWhen: "markerPressed",
         },
-
-        description: `
-          <table class="cesium-infoBox-defaultTable">
-            <tr><th>Power</th><td>${power} kW</td></tr>
-            <tr><th>Connector ID</th><td>${connectorId}</td></tr>
-          </table>
-        `,
       });
     });
 
-    console.log("Visible charger icons loaded");
+    console.log("Helper EV markers inside Glasgow added:", chargerCount);
   } catch (error) {
     console.error("Error loading chargers CSV:", error);
   }
@@ -281,7 +285,7 @@ Cesium.Ion.defaultAccessToken =
   viewer.entities.add({
     polygon: {
       hierarchy: glasgowBoundary,
-      material: Cesium.Color.WHITE.withAlpha(0.04),
+      material: Cesium.Color.WHITE.withAlpha(0.03),
       outline: true,
       outlineColor: Cesium.Color.WHITE,
       outlineWidth: 4,
@@ -298,14 +302,7 @@ Cesium.Ion.defaultAccessToken =
   });
 
   viewer.camera.flyTo({
-    destination: Cesium.Cartesian3.fromDegrees(-4.2518, 55.8642, 1200),
-
-    orientation: {
-      heading: Cesium.Math.toRadians(20),
-      pitch: Cesium.Math.toRadians(-35),
-      roll: 0,
-    },
-
-    duration: 4,
+    destination: Cesium.Rectangle.fromCartesianArray(glasgowBoundary),
+    duration: 3,
   });
 })();
