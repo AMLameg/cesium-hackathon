@@ -39,7 +39,26 @@
       z-index: 1000;
       border: 1px solid #777;">
     </div>
+    <div id="controls" style="position: absolute; top: 10px; left: 10px; z-index: 100; background: rgba(255,255,255,0.9); padding: 15px; border-radius: 8px; width: 250px;">
+    <h3>Control Panel</h3>
+    
+    <!-- This will be filled with POI buttons -->
+    <div id="poi-links">
+        <p><strong>Locations</strong></p>
+    </div>
+
+    <hr>
+
+    <!-- Global actions -->
+    <div id="global-actions">
+        <p><strong>Vehicle Actions</strong></p>
+        <button id="btn-spawn" style="width: 100%; margin-bottom: 5px;">Spawn Random Route</button>
+        <button id="btn-zoom-vehicle" style="width: 100%;" disabled>Track Vehicle</button>
+        <button id="btn-stop-tracking" style="width: 100%;" enabled>Stop Tracking</button>
+    </div>
+</div>
     <!-- Change this much later -->
     <script type="module" src="/src/cesium.js"></script> 
+    
   </body>
 </html>

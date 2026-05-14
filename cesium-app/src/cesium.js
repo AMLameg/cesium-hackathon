@@ -118,33 +118,70 @@ rows.forEach((row) => {
     });
   });
 
-async function spawncar(){
-  const carPlaceholder = viewer.entities.add({
-    name: 'Car Placeholder',
-    position: Cesium.Cartesian3.fromDegrees(-4.2518, 55.8642),
-    // Orientation is needed so the box turns with the road
-    orientation: Cesium.Transforms.headingPitchRollQuaternion(
-      Cesium.Cartesian3.fromDegrees(-4.2518, 55.8642),
-      new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(45), 0, 0)
-    ),
-    box: {
-      dimensions: new Cesium.Cartesian3(4.5, 2.0, 1.5), // Length, Width, Height in meters
-      material: Cesium.Color.RED.withAlpha(0.8),
-      outline: true,
-      outlineColor: Cesium.Color.BLACK,
-      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
-    }
-  });
-
-  return carPlaceholder;
-}
-
 // ai-gen code for graph building
 const response = await fetch('../public/glasgow.geojson');
 const road_geojson = await response.json();
 let routingGraph = buildRoutingGraphFromGeoJson(road_geojson);
 
 console.log(routingGraph);
+
+async function spawnVehicle(poiMap, startName, endName) {
+    // 1. Get the coordinates from your Map
+    const startPOI = poiMap.get(startName);
+    const endPOI = poiMap.get(endName);
+
+    if (!startPOI || !endPOI) {
+        console.error("One of the POIs was not found in the map!");
+        return;
+    }
+
+    // 2. Set the timing (Start now, arrive in 30 seconds)
+    const startTime = Cesium.JulianDate.now();
+    const stopTime = Cesium.JulianDate.addSeconds(startTime, 30, new Cesium.JulianDate());
+
+    // 3. Create the position property
+    const position = new Cesium.SampledPositionProperty();
+
+    // Start point
+    const startPos = Cesium.Cartesian3.fromDegrees(startPOI.longitude, startPOI.latitude);
+    position.addSample(startTime, startPos);
+
+    // Stop point
+    const endPos = Cesium.Cartesian3.fromDegrees(endPOI.longitude, endPOI.latitude);
+    position.addSample(stopTime, endPos);
+
+    // 4. Create the Vehicle Entity
+    const vehicle = viewer.entities.add({
+        name: `Travel from ${startName} to ${endName}`,
+        availability: new Cesium.TimeIntervalCollection([
+            new Cesium.TimeInterval({ start: startTime, stop: stopTime })
+        ]),
+        position: position,
+        // Automatically calculate orientation (heading) based on movement
+        orientation: new Cesium.VelocityOrientationProperty(position),
+        model: {
+            uri: '../public/models/GroundVehicle.glb', // Path to a 3D model
+            minimumPixelSize: 64
+        },
+        path: {
+            resolution: 1,
+            material: new Cesium.PolylineGlowMaterialProperty({
+                glowPower: 0.1,
+                color: Cesium.Color.YELLOW
+            }),
+            width: 10
+        }
+    });
+
+    // Make the timeline track this vehicle
+    viewer.clock.startTime = startTime.clone();
+    viewer.clock.stopTime = stopTime.clone();
+    viewer.clock.currentTime = startTime.clone();
+    viewer.clock.multiplier = 1; // Real-time speed
+    viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP; 
+
+    return vehicle;
+}
 
 function buildRoutingGraphFromGeoJson(geojson) {
   const nodes = new Map();   // coordKey → { lat, lon, id }
@@ -373,7 +410,7 @@ function routeAndAnimate(fromLat, fromLon, toLat, toLon) {
 
   if (!route) return console.warn("No route found");
 
-  animateVehicle(viewer, route);
+  return animateVehicle(viewer, route);
 }
 
 
@@ -400,11 +437,92 @@ async function fetchPoIs(count){
   return randomPois;
 }
 
+
+let currentVehicle = null; // We store the vehicle entity here
+
+async function setupDashboard() {
+    const poiMap = await pointsOfInterest(); // Load your JSON map
+    const poiContainer = document.getElementById('poi-links');
+    const zoomVehicleBtn = document.getElementById('btn-zoom-vehicle');
+    const stopTrackBtn = document.getElementById('btn-stop-tracking');
+
+    // 1. Generate "Zoom to POI" buttons
+    poiMap.forEach((poi, name) => {
+        const btn = document.createElement('button');
+        btn.innerText = `${name}`;
+        btn.style.cssText = "display:block; width:100%; margin:4px 0; text-align:left; cursor:pointer;";
+        
+        btn.onclick = () => {
+          const height = 500.0; // How high the camera is above the ground
+          const distanceOffset = 0.005; // Offset in degrees to pull the camera back
+
+          viewer.camera.flyTo({
+              // 1. Destination: Where the CAMERA goes (offset to the South)
+              destination: Cesium.Cartesian3.fromDegrees(
+                  poi.longitude, 
+                  poi.latitude - distanceOffset, // Pull back south so we can look 'at' it
+                  height
+              ),
+              orientation: {
+                  heading: Cesium.Math.toRadians(0.0),   // Face North (0 degrees)
+                  pitch: Cesium.Math.toRadians(-35.0),  // Look down at a 35-degree angle
+                  roll: 0.0                             // Keep the horizon level
+              },
+              duration: 2 // Seconds for the flight animation
+          });
+      };
+        poiContainer.appendChild(btn);
+    });
+
+    document.getElementById('btn-spawn').onclick = () => {
+        if (currentVehicle) viewer.entities.remove(currentVehicle);
+
+        // Get two random POIs from your Map
+        const [start, end] = getRandomN(poiMap, 2);
+        
+        console.log(`Routing from ${start.name} to ${end.name}...`);
+
+        // Use the coordinates from the POIs to find a road path
+        currentVehicle = routeAndAnimate(start.latitude, start.longitude, end.latitude, end.longitude);
+        
+        if (currentVehicle) {
+            zoomVehicleBtn.disabled = false;
+        }
+    };
+
+    // "Track Vehicle" Button logic
+    zoomVehicleBtn.onclick = () => {
+        if (currentVehicle) {
+            viewer.trackedEntity = currentVehicle;
+            stopTrackBtn.disabled = false;
+            zoomVehicleBtn.disabled = true;
+        }
+    };
+
+    // NEW: "Stop Tracking" Button logic
+    stopTrackBtn.onclick = () => {
+        viewer.trackedEntity = undefined; 
+        stopTrackBtn.disabled = true; 
+        zoomVehicleBtn.disabled = false;
+
+        
+        // Optional: Provide a small camera offset so it doesn't feel "stuck"
+        // viewer.camera.moveBackward(50); 
+        
+        console.log("Camera tracking detached.");
+    };
+}
+
+// Call the setup
+setupDashboard();
+
 // get some pois
 fetchPoIs(5)
 
 // this needs to be a button and the coordinates need to be dynamic
-routeAndAnimate(55.8609, -4.2514, 55.8580, -4.2572);
+// routeAndAnimate(55.8609, -4.2514, 55.8580, -4.2572);
+
+routeAndAnimate(55.8453095, -4.2554813, 55.8580, -4.2572)
 
 
 
