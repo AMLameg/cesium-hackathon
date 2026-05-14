@@ -1,45 +1,32 @@
-<!-- <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>cesium-app</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
-</html> -->
-
-
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-      /* Ensure the container takes up the full screen */
-      body { margin: 0; padding: 0; overflow: hidden; }
-      #cesiumContainer { width: 100vw; height: 100vh; }
-    </style>
-    <title>Cesium Flooding Visualisation</title>
-  </head>
-  <body>
-    <div id="cesiumContainer"></div>
-    <div id="cesium-tooltip" style="
-      display: none; 
-      position: absolute; 
-      background: rgba(42, 42, 42, 0.9); 
-      color: white; 
-      padding: 8px; 
-      border-radius: 4px; 
-      pointer-events: none; 
-      font-family: sans-serif; 
-      z-index: 1000;
-      border: 1px solid #777;">
-    </div>
-    <!-- Change this much later -->
-    <script type="module" src="/src/cesium.js"></script> 
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <title>Chargers</title>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "cesium": "../../Build/CesiumUnminified/index.js"
+    }
+  }
+  </script>
+
+  <link href="../../Build/CesiumUnminified/Widgets/widgets.css" rel="stylesheet">
+
+  <style>
+    html, body, #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+  <script type="module" src="/src/cesium.js"></script> 
+</body>
 </html>
