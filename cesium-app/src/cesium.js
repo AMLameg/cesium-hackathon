@@ -305,4 +305,306 @@ Cesium.Ion.defaultAccessToken =
     destination: Cesium.Rectangle.fromCartesianArray(glasgowBoundary),
     duration: 3,
   });
+
+  async function spawncar(){
+  const carPlaceholder = viewer.entities.add({
+    name: 'Car Placeholder',
+    position: Cesium.Cartesian3.fromDegrees(-4.2518, 55.8642),
+    // Orientation is needed so the box turns with the road
+    orientation: Cesium.Transforms.headingPitchRollQuaternion(
+      Cesium.Cartesian3.fromDegrees(-4.2518, 55.8642),
+      new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(45), 0, 0)
+    ),
+    box: {
+      dimensions: new Cesium.Cartesian3(4.5, 2.0, 1.5), // Length, Width, Height in meters
+      material: Cesium.Color.RED.withAlpha(0.8),
+      outline: true,
+      outlineColor: Cesium.Color.BLACK,
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+    }
+  });
+
+  return carPlaceholder;
+}
+
+// ai-gen code for graph building
+const response = await fetch('../public/glasgow.geojson');
+const road_geojson = await response.json();
+let routingGraph = buildRoutingGraphFromGeoJson(road_geojson);
+
+console.log(routingGraph);
+
+function buildRoutingGraphFromGeoJson(geojson) {
+  const nodes = new Map();   // coordKey → { lat, lon, id }
+  const adjacency = new Map(); // nodeId → [{ nodeId, distance, coords }]
+  let nodeIdCounter = 0;
+
+  // Stable key for a coordinate pair
+  const coordKey = (lon, lat) => `${lon.toFixed(7)},${lat.toFixed(7)}`;
+
+  const getOrCreateNode = (lon, lat) => {
+    const key = coordKey(lon, lat);
+    if (!nodes.has(key)) {
+      nodes.set(key, { id: key, lat, lon });
+    }
+    return key;
+  };
+
+  const ROUTABLE = new Set([
+    "motorway", "trunk", "primary", "secondary", "tertiary",
+    "residential", "service", "unclassified", "living_street",
+    "motorway_link", "trunk_link", "primary_link", "secondary_link",
+  ]);
+  for (const feature of geojson.features) {
+    const { geometry, properties } = feature;
+
+    // Skip non-routable features
+    if (properties.highway && !ROUTABLE.has(properties.highway)) continue;
+
+    const isOneWay = properties.oneway === "yes" ||
+                     properties.oneway === "1"   ||
+                     properties.junction === "roundabout";
+
+    // Handle both LineString and MultiLineString
+    const lines =
+      geometry.type === "LineString"      ? [geometry.coordinates]      :
+      geometry.type === "MultiLineString" ? geometry.coordinates         : [];
+
+    for (const line of lines) {
+      for (let i = 0; i < line.length - 1; i++) {
+        const [lon1, lat1] = line[i];
+        const [lon2, lat2] = line[i + 1];
+
+        const fromId = getOrCreateNode(lon1, lat1);
+        const toId   = getOrCreateNode(lon2, lat2);
+        const dist   = haversineDistance({ lat: lat1, lon: lon1 }, { lat: lat2, lon: lon2 });
+
+        addEdge(adjacency, fromId, toId, dist);
+        if (!isOneWay) addEdge(adjacency, toId, fromId, dist);
+      }
+    }
+  }
+
+  return { nodes, adjacency };
+}
+
+function addEdge(adjacency, fromId, toId, distance) {
+  if (!adjacency.has(fromId)) adjacency.set(fromId, []);
+  adjacency.get(fromId).push({ nodeId: toId, distance });
+}
+// Haversine distance in metres between two {lat,lon} points
+function haversineDistance(a, b) {
+  const R = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) *
+    Math.cos((b.lat * Math.PI) / 180) *
+    Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+// routing
+
+function astar(adjacency, nodes, startId, endId) {
+  const end = nodes.get(endId);
+
+  // Heuristic: straight-line distance to goal
+  const h = (nodeId) => {
+    const n = nodes.get(nodeId);
+    return n ? haversineDistance(n, end) : Infinity;
+  };
+
+  const gScore = new Map([[startId, 0]]);
+  const fScore = new Map([[startId, h(startId)]]);
+  const cameFrom = new Map();
+  const open = new Set([startId]);
+
+  while (open.size > 0) {
+    // Pick node in open with lowest fScore
+    const current = [...open].reduce((a, b) =>
+      (fScore.get(a) ?? Infinity) < (fScore.get(b) ?? Infinity) ? a : b
+    );
+
+    if (current === endId) return reconstructPath(cameFrom, endId, adjacency, nodes);
+
+    open.delete(current);
+
+    for (const { nodeId: neighbour, distance } of adjacency.get(current) ?? []) {
+      const tentative = (gScore.get(current) ?? Infinity) + distance;
+
+      if (tentative < (gScore.get(neighbour) ?? Infinity)) {
+        cameFrom.set(neighbour, current);
+        gScore.set(neighbour, tentative);
+        fScore.set(neighbour, tentative + h(neighbour));
+        open.add(neighbour);
+      }
+    }
+  }
+  console.log('No path found')
+  return null; // No path found
+}
+
+function reconstructPath(cameFrom, endId, adjacency, nodes) {
+  const nodeIds = [endId];
+  let current = endId;
+
+  while (cameFrom.has(current)) {
+    current = cameFrom.get(current);
+    nodeIds.unshift(current);
+  }
+
+  // Expand node IDs to [lon, lat] coordinate arrays
+  return nodeIds.map(id => {
+    const n = nodes.get(id);
+    return [n.lon, n.lat];
+  });
+}
+
+function nearestNode(nodes, lat, lon) {
+  let bestId = null;
+  let bestDist = Infinity;
+
+  for (const [id, node] of nodes) {
+    const dist = haversineDistance({ lat, lon }, node);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestId = id;
+    }
+  }
+
+  return bestId;
+}
+
+function animateVehicle(viewer, routeCoords, speedMetresPerSecond = 13.9) {
+  const start = Cesium.JulianDate.now();
+  const positions = new Cesium.SampledPositionProperty();
+  positions.setInterpolationOptions({
+    interpolationAlgorithm: Cesium.LagrangePolynomialApproximation,
+    interpolationDegree: 2,
+  });
+
+  let elapsed = 0;
+
+  for (let i = 0; i < routeCoords.length; i++) {
+    if (i > 0) {
+      const [lon1, lat1] = routeCoords[i - 1];
+      const [lon2, lat2] = routeCoords[i];
+      elapsed += haversineDistance({ lat: lat1, lon: lon1 }, { lat: lat2, lon: lon2 })
+                 / speedMetresPerSecond;
+    }
+
+    const time = Cesium.JulianDate.addSeconds(start, elapsed, new Cesium.JulianDate());
+    const pos  = Cesium.Cartesian3.fromDegrees(routeCoords[i][0], routeCoords[i][1], 2);
+    positions.addSample(time, pos);
+  }
+
+  const end = Cesium.JulianDate.addSeconds(start, elapsed, new Cesium.JulianDate());
+
+  const vehicle = viewer.entities.add({
+    availability: new Cesium.TimeIntervalCollection([
+      new Cesium.TimeInterval({ start, stop: end }),
+    ]),
+    position: positions,
+    orientation: new Cesium.VelocityOrientationProperty(positions),
+    point: {
+      pixelSize: 14,
+      color: Cesium.Color.LIME,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2,
+      heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  });
+
+  // Drive the clock
+  viewer.clock.startTime    = start;
+  viewer.clock.stopTime     = end;
+  viewer.clock.currentTime  = Cesium.JulianDate.clone(start);
+  viewer.clock.multiplier   = 1;
+  viewer.clock.clockRange   = Cesium.ClockRange.LOOP_STOP;
+  viewer.clock.shouldAnimate = true;
+  viewer.timeline?.zoomTo(start, end);
+
+  // Fly to the vehicle first, then lock on
+  viewer.flyTo(vehicle, {
+    offset: new Cesium.HeadingPitchRange(
+      Cesium.Math.toRadians(0),   // heading: match vehicle direction
+      Cesium.Math.toRadians(-45), // pitch: looking down at 45°
+      120                         // range: 120m behind/above
+    ),
+  }).then(() => {
+    // Lock camera to vehicle — it will follow automatically from here
+    viewer.trackedEntity = vehicle;
+  });
+
+  // Unlock camera when the vehicle finishes its route
+  const removeListener = viewer.clock.onTick.addEventListener(() => {
+    if (Cesium.JulianDate.compare(viewer.clock.currentTime, end) >= 0) {
+      viewer.trackedEntity = undefined;
+      removeListener();
+    }
+  });
+
+  return vehicle;
+}
+
+function routeAndAnimate(fromLat, fromLon, toLat, toLon) {
+  if (!routingGraph) return console.warn("Routing graph not ready");
+
+  const { nodes, adjacency } = routingGraph;
+
+  const startId = nearestNode(nodes, fromLat, fromLon);
+  const endId   = nearestNode(nodes, toLat, toLon);
+  const route   = astar(adjacency, nodes, startId, endId);
+
+  if (!route) return console.warn("No route found");
+
+  animateVehicle(viewer, route);
+}
+
+
+async function pointsOfInterest(){
+  const response = await fetch('../public/poi.json');
+  const data = await response.json();
+
+  const poiMap = new Map(data.map(poi => [poi.name, poi]));
+  return poiMap;
+}
+
+function getRandomN(poiMap,count) {
+    return [...poiMap.values()]
+        .sort(() => Math.random() - 0.5)
+        .slice(0, count);                  
+}
+
+async function fetchPoIs(count){
+  const poi = await pointsOfInterest();
+  const randomPois = getRandomN(poi,count);
+
+  console.log(randomPois)
+
+  return randomPois;
+}
+
+// get some pois
+fetchPoIs(5)
+
+// this needs to be a button and the coordinates need to be dynamic
+routeAndAnimate(55.8609, -4.2514, 55.8580, -4.2572);
+
+
+
+// Fly to Glasgow
+// viewer.camera.flyTo({
+//   destination: Cesium.Cartesian3.fromDegrees(-4.2514, 55.8609, 1200),
+//   orientation: {
+//     heading: Cesium.Math.toRadians(20),
+//     pitch: Cesium.Math.toRadians(-35),
+//     roll: 0,
+//   },
+//   duration: 4,
+// });
+
 })();
