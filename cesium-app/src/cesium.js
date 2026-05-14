@@ -556,12 +556,12 @@ routeAndAnimate(55.8453095, -4.2554813, 55.8580, -4.2572)
 
 
 // Fly to Glasgow
-// viewer.camera.flyTo({
-//   destination: Cesium.Cartesian3.fromDegrees(-4.2514, 55.8609, 1200),
-//   orientation: {
-//     heading: Cesium.Math.toRadians(20),
-//     pitch: Cesium.Math.toRadians(-35),
-//     roll: 0,
-//   },
-//   duration: 4,
-// });
+viewer.camera.flyTo({
+  destination: Cesium.Cartesian3.fromDegrees(-4.2514, 55.8609, 1200),
+  orientation: {
+    heading: Cesium.Math.toRadians(20),
+    pitch: Cesium.Math.toRadians(-35),
+    roll: 0,
+  },
+  duration: 4,
+});
