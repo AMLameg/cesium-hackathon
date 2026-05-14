@@ -29,7 +29,7 @@ try {
   });
   viewer.scene.primitives.add(tileset);
 
-  const resource = await Cesium.IonResource.fromAssetId(4773439);
+  const resource = await Cesium.IonResource.fromAssetId(4773439); // flooding data
   const dataSource = await Cesium.GeoJsonDataSource.load(resource, {
     clampToGround: true,
   });
@@ -326,7 +326,7 @@ function nearestNode(nodes, lat, lon) {
   return bestId;
 }
 
-function animateVehicle(viewer, routeCoords, speedMetresPerSecond = 13.9) {
+function animateVehicle(viewer, routeCoords, modelUri, speedMetresPerSecond = 13.9) {
   const start = Cesium.JulianDate.now();
   const positions = new Cesium.SampledPositionProperty();
   positions.setInterpolationOptions({
@@ -345,26 +345,37 @@ function animateVehicle(viewer, routeCoords, speedMetresPerSecond = 13.9) {
     }
 
     const time = Cesium.JulianDate.addSeconds(start, elapsed, new Cesium.JulianDate());
-    const pos  = Cesium.Cartesian3.fromDegrees(routeCoords[i][0], routeCoords[i][1], 2);
+    const pos  = Cesium.Cartesian3.fromDegrees(routeCoords[i][0], routeCoords[i][1], 0);
     positions.addSample(time, pos);
   }
 
   const end = Cesium.JulianDate.addSeconds(start, elapsed, new Cesium.JulianDate());
+
+  const flipRotation = Cesium.Quaternion.fromAxisAngle(
+    Cesium.Cartesian3.UNIT_Z, 
+    Cesium.Math.toRadians(180)
+);
 
   const vehicle = viewer.entities.add({
     availability: new Cesium.TimeIntervalCollection([
       new Cesium.TimeInterval({ start, stop: end }),
     ]),
     position: positions,
-    orientation: new Cesium.VelocityOrientationProperty(positions),
-    point: {
-      pixelSize: 14,
-      color: Cesium.Color.LIME,
-      outlineColor: Cesium.Color.BLACK,
-      outlineWidth: 2,
-      heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
-      disableDepthTestDistance: Number.POSITIVE_INFINITY,
-    },
+    orientation: new Cesium.CallbackProperty((time, result) => {
+        const velocityOrientation = new Cesium.VelocityOrientationProperty(positions).getValue(time);
+        if (!velocityOrientation) return result;
+        
+        // Multiply the auto-heading by our 180-degree flip
+        return Cesium.Quaternion.multiply(velocityOrientation, flipRotation, new Cesium.Quaternion());
+    }, false),
+    
+    model: {
+      uri: modelUri,
+      minimumPixelSize: 128, // Keeps it visible when zooming out
+      maximumScale: 20000,
+      // Ensures the wheels stay on the 3D tiles/ground
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND 
+    }
   });
 
   // Drive the clock
@@ -399,7 +410,7 @@ function animateVehicle(viewer, routeCoords, speedMetresPerSecond = 13.9) {
   return vehicle;
 }
 
-function routeAndAnimate(fromLat, fromLon, toLat, toLon) {
+function routeAndAnimate(fromLat, fromLon, toLat, toLon, ambulanceURI) {
   if (!routingGraph) return console.warn("Routing graph not ready");
 
   const { nodes, adjacency } = routingGraph;
@@ -410,7 +421,7 @@ function routeAndAnimate(fromLat, fromLon, toLat, toLon) {
 
   if (!route) return console.warn("No route found");
 
-  return animateVehicle(viewer, route);
+  return animateVehicle(viewer, route, ambulanceURI);
 }
 
 
@@ -437,6 +448,20 @@ async function fetchPoIs(count){
   return randomPois;
 }
 
+function isPointInPolygon(point, polygon) {
+    // point is [lon, lat], polygon is an array of [lon, lat]
+    let x = point[0], y = point[1];
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        let xi = polygon[i][0], yi = polygon[i][1];
+        let xj = polygon[j][0], yj = polygon[j][1];
+        let intersect = ((yi > y) !== (yj > y)) &&
+            (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
 
 let currentVehicle = null; // We store the vehicle entity here
 
@@ -445,7 +470,8 @@ async function setupDashboard() {
     const poiContainer = document.getElementById('poi-links');
     const zoomVehicleBtn = document.getElementById('btn-zoom-vehicle');
     const stopTrackBtn = document.getElementById('btn-stop-tracking');
-
+    const ambulanceUri = await Cesium.IonResource.fromAssetId(4771475);
+    
     // 1. Generate "Zoom to POI" buttons
     poiMap.forEach((poi, name) => {
         const btn = document.createElement('button');
@@ -475,20 +501,23 @@ async function setupDashboard() {
     });
 
     document.getElementById('btn-spawn').onclick = () => {
-        if (currentVehicle) viewer.entities.remove(currentVehicle);
+    if (currentVehicle) viewer.entities.remove(currentVehicle);
 
-        // Get two random POIs from your Map
-        const [start, end] = getRandomN(poiMap, 2);
-        
-        console.log(`Routing from ${start.name} to ${end.name}...`);
+    const [start, end] = getRandomN(poiMap, 2);
+    
+    // Pass the coordinates to your routing logic
+    const { nodes, adjacency } = routingGraph;
+    const startId = nearestNode(nodes, start.latitude, start.longitude);
+    const endId   = nearestNode(nodes, end.latitude, end.longitude);
+    const route   = astar(adjacency, nodes, startId, endId);
 
-        // Use the coordinates from the POIs to find a road path
-        currentVehicle = routeAndAnimate(start.latitude, start.longitude, end.latitude, end.longitude);
-        
-        if (currentVehicle) {
-            zoomVehicleBtn.disabled = false;
-        }
-    };
+    if (route) {
+        // Now passing the ambulanceUri here
+        currentVehicle = animateVehicle(viewer, route, ambulanceUri);
+        zoomVehicleBtn.disabled = false;
+        stopTrackBtn.disabled = false;
+    }
+};
 
     // "Track Vehicle" Button logic
     zoomVehicleBtn.onclick = () => {
