@@ -75,6 +75,7 @@ roads.entities.suspendEvents();
 
 const road_entities = roads.entities.values;
 road_entities.forEach((road) => {
+    road.billboard = undefined; // do not touch; enabling this makes the app slow asf
     road.stroke = red,
     road.strokeWidth =  3,       
     road.fill = red_mod1
@@ -101,7 +102,7 @@ rows.forEach((row) => {
       name: `Charger: ${id}`,
       position: Cesium.Cartesian3.fromDegrees(lon, lat),
       point: {
-        pixelSize: 50,
+        pixelSize: 200,
         color: Cesium.Color.ORANGE,
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
