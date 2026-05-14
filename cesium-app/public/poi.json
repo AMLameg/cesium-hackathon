@@ -1,0 +1,93 @@
+[
+  {
+    "name": "Glasgow Cathedral",
+    "latitude": 55.8629,
+    "longitude": -4.2345,
+    "category": "Historic",
+    "description": "A stunning 12th-century gothic cathedral."
+  },
+  {
+    "name": "The Necropolis",
+    "latitude": 55.8625,
+    "longitude": -4.2311,
+    "category": "Historic",
+    "description": "A Victorian cemetery with views over the city."
+  },
+  {
+    "name": "George Square",
+    "latitude": 55.8611,
+    "longitude": -4.2503,
+    "category": "Historic",
+    "description": "The city's main civic square, home to City Chambers."
+  },
+  {
+    "name": "University of Glasgow",
+    "latitude": 55.8715,
+    "longitude": -4.2885,
+    "category": "Historic",
+    "description": "Iconic Hogwarts-style main building and cloisters."
+  },
+  {
+    "name": "People's Palace",
+    "latitude": 55.8511,
+    "longitude": -4.2372,
+    "category": "Historic",
+    "description": "Social history museum located in Glasgow Green."
+  },
+  {
+    "name": "Kelvingrove Museum",
+    "latitude": 55.8686,
+    "longitude": -4.2906,
+    "category": "Museum",
+    "description": "World-class art and natural history museum."
+  },
+  {
+    "name": "Riverside Museum",
+    "latitude": 55.8651,
+    "longitude": -4.3061,
+    "category": "Museum",
+    "description": "Zaha Hadid-designed transport museum."
+  },
+  {
+    "name": "Gallery of Modern Art (GoMA)",
+    "latitude": 55.8601,
+    "longitude": -4.2519,
+    "category": "Museum",
+    "description": "Gallery of Modern Art in the city center."
+  },
+  {
+    "name": "Burrell Collection",
+    "latitude": 55.8311,
+    "longitude": -4.3072,
+    "category": "Museum",
+    "description": "A massive collection of art and antiquities."
+  },
+  {
+    "name": "Pollok House",
+    "latitude": 55.8285,
+    "longitude": -4.3186,
+    "category": "Museum",
+    "description": "Grand country house within Pollok Country Park."
+  },
+  {
+    "name": "Glasgow Science Centre",
+    "latitude": 55.8588,
+    "longitude": -4.2933,
+    "category": "Modern",
+    "description": "Interactive science hub with a rotating tower."
+  },
+  {
+    "name": "OVO Hydro (SEC)",
+    "latitude": 55.8585,
+    "longitude": -4.2863,
+    "category": "Modern",
+    "description": "The city's premier arena for music and events."
+  },
+  {
+    "name": "Glasgow Botanic Gardens",
+    "latitude": 55.8791,
+    "longitude": -4.2902,
+    "category": "Modern",
+    "description": "Home to the famous Kibble Palace glasshouse."
+  }
+]

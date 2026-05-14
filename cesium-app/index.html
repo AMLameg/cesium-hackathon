@@ -27,6 +27,18 @@
   </head>
   <body>
     <div id="cesiumContainer"></div>
+    <div id="cesium-tooltip" style="
+      display: none; 
+      position: absolute; 
+      background: rgba(42, 42, 42, 0.9); 
+      color: white; 
+      padding: 8px; 
+      border-radius: 4px; 
+      pointer-events: none; 
+      font-family: sans-serif; 
+      z-index: 1000;
+      border: 1px solid #777;">
+    </div>
     <!-- Change this much later -->
     <script type="module" src="/src/cesium.js"></script> 
   </body>
