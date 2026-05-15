@@ -23,16 +23,24 @@ const white = Cesium.Color.WHITE
 const red_mod1 = Color.RED.withAlpha(0.3);
 const red = Color.RED;
 
-try {
-  const tileset = await Cesium.createGooglePhotorealistic3DTileset({
+// lets
+
+let floodPolygons = [];
+let pointsToAvoid = [];
+let chargersList = [];
+
+const tileset = await Cesium.createGooglePhotorealistic3DTileset({
     onlyUsingWithGoogleGeocoder: true,
   });
   viewer.scene.primitives.add(tileset);
 
-  const resource = await Cesium.IonResource.fromAssetId(4773439); // flooding data
-  const dataSource = await Cesium.GeoJsonDataSource.load(resource, {
+  const flood_resource = await Cesium.IonResource.fromAssetId(4773439); // flooding data
+  const dataSource = await Cesium.GeoJsonDataSource.load(flood_resource, {
     clampToGround: true,
   });
+
+try {
+  
 
   // suspend and resume are here for optimisation reasons >> ref: https://cesium.com/learn/ion-sdk/ref-doc/EntityCollection.html , https://community.cesium.com/t/what-is-the-best-way-to-update-1000-entity-positon-10times-per-second/15992/2
   dataSource.entities.suspendEvents()
@@ -65,6 +73,34 @@ try {
   console.error("Error loading Cesium content:", error);
 }
 
+floodPolygons = extractFloodCoordinates(dataSource);
+
+function extractFloodCoordinates(dataSource) {
+    const polygons = [];
+    const entities = dataSource.entities.values;
+
+    for (const entity of entities) {
+        // Check if the entity is a rendered polygon
+        if (entity.polygon && entity.polygon.hierarchy) {
+            const hierarchy = entity.polygon.hierarchy.getValue(Cesium.JulianDate.now());
+            
+            if (hierarchy && hierarchy.positions) {
+                // Convert Cesium's internal Cartesian3 world positions back to [lon, lat] degrees
+                const outerRing = hierarchy.positions.map(position => {
+                    const cartographic = Cesium.Cartographic.fromCartesian(position);
+                    return [
+                        Cesium.Math.toDegrees(cartographic.longitude),
+                        Cesium.Math.toDegrees(cartographic.latitude)
+                    ];
+                });
+                
+                polygons.push(outerRing);
+            }
+        }
+    }
+    return polygons;
+}
+
 
 const roads = await Cesium.GeoJsonDataSource.load('../public/glasgow.geojson', {     
     clampToGround: true,
@@ -89,7 +125,8 @@ const evc_data = await foo.text()
 const rows = evc_data.split('\n').slice(1);
 
 rows.forEach((row) => {
-    const cols = row.split(',');
+  // console.log(row)
+    const cols = row.split('\t');
     if (cols.length < 2) return; 
 
     const lat          = parseFloat(cols[0]);
@@ -98,11 +135,13 @@ rows.forEach((row) => {
     const power        = cols[3];
     const connectorId  = cols[4];
 
+    chargersList.push({ lat, lon, id, power });
+
     viewer.entities.add({
       name: `Charger: ${id}`,
       position: Cesium.Cartesian3.fromDegrees(lon, lat),
       point: {
-        pixelSize: 200,
+        pixelSize: 8,
         color: Cesium.Color.ORANGE,
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
@@ -117,7 +156,7 @@ rows.forEach((row) => {
       `
     });
   });
-
+console.log(chargersList)
 // ai-gen code for graph building
 const response = await fetch('../public/glasgow.geojson');
 const road_geojson = await response.json();
@@ -183,6 +222,27 @@ async function spawnVehicle(poiMap, startName, endName) {
     return vehicle;
 }
 
+function findClosestCharger(currentLat, currentLon) {
+    if (chargersList.length === 0) return null;
+
+    let closestCharger = null;
+    let minDistance = Infinity;
+
+    chargersList.forEach(charger => {
+        const dist = haversineDistance(
+            { lat: currentLat, lon: currentLon },
+            { lat: charger.lat, lon: charger.lon }
+        );
+
+        if (dist < minDistance) {
+            minDistance = dist;
+            closestCharger = charger;
+        }
+    });
+
+    return closestCharger;
+}
+
 function buildRoutingGraphFromGeoJson(geojson) {
   const nodes = new Map();   // coordKey → { lat, lon, id }
   const adjacency = new Map(); // nodeId → [{ nodeId, distance, coords }]
@@ -241,6 +301,48 @@ function addEdge(adjacency, fromId, toId, distance) {
   if (!adjacency.has(fromId)) adjacency.set(fromId, []);
   adjacency.get(fromId).push({ nodeId: toId, distance });
 }
+
+function runEmergencyChargingScenario(fromLat, fromLon, toLat, toLon, ambulanceUri) {
+    if (!routingGraph) return console.warn("Routing graph not ready");
+    const { nodes, adjacency } = routingGraph;
+
+    // 1. "Oh no! Low battery!" -> Find the nearest charger to the starting position
+    const charger = findClosestCharger(fromLat, fromLon);
+    if (!charger) {
+        console.warn("No charging stations loaded in memory.");
+        return null;
+    }
+    console.log(`Low Battery Event: Diverting to Charger ${charger.id} first.`);
+
+    // 2. Identify all network node IDs
+    const startNodeId   = nearestNode(nodes, fromLat, fromLon);
+    const chargerNodeId = nearestNode(nodes, charger.lat, charger.lon);
+    const endNodeId     = nearestNode(nodes, toLat, toLon);
+
+    // 3. Leg 1: Travel from Point A to Charger (Avoiding Floods)
+    const leg1 = astar(adjacency, nodes, startNodeId, chargerNodeId);
+    if (!leg1) {
+        console.warn("Could not find a flood-safe path to the charging station.");
+        return null;
+    }
+
+    // 4. Leg 2: Resume Journey from Charger to Point B (Avoiding Floods)
+    const leg2 = astar(adjacency, nodes, chargerNodeId, endNodeId);
+    if (!leg2) {
+        console.warn("Could not find a flood-safe path from the charger to destination.");
+        return null;
+    }
+
+    // 5. Stitch the journey together 
+    // (.slice(1) removes the duplicate waypoint node where the legs connect)
+    const fullScenarioPath = leg1.concat(leg2.slice(1));
+
+    console.log("Route calculated successfully. Dispatching ambulance around flood parameters.");
+    
+    // 6. Send the stitched road matrix to your animation layer
+    return animateVehicle(viewer, fullScenarioPath, ambulanceUri);
+}
+
 // Haversine distance in metres between two {lat,lon} points
 function haversineDistance(a, b) {
   const R = 6371000;
@@ -257,42 +359,56 @@ function haversineDistance(a, b) {
 // routing
 
 function astar(adjacency, nodes, startId, endId) {
-  const end = nodes.get(endId);
+    const end = nodes.get(endId);
+    const h = (nodeId) => {
+        const n = nodes.get(nodeId);
+        return n ? haversineDistance(n, end) : Infinity;
+    };
 
-  // Heuristic: straight-line distance to goal
-  const h = (nodeId) => {
-    const n = nodes.get(nodeId);
-    return n ? haversineDistance(n, end) : Infinity;
-  };
+    const gScore = new Map([[startId, 0]]);
+    const fScore = new Map([[startId, h(startId)]]);
+    const cameFrom = new Map();
+    const open = new Set([startId]);
 
-  const gScore = new Map([[startId, 0]]);
-  const fScore = new Map([[startId, h(startId)]]);
-  const cameFrom = new Map();
-  const open = new Set([startId]);
+    while (open.size > 0) {
+        const current = [...open].reduce((a, b) =>
+            (fScore.get(a) ?? Infinity) < (fScore.get(b) ?? Infinity) ? a : b
+        );
 
-  while (open.size > 0) {
-    // Pick node in open with lowest fScore
-    const current = [...open].reduce((a, b) =>
-      (fScore.get(a) ?? Infinity) < (fScore.get(b) ?? Infinity) ? a : b
-    );
+        if (current === endId) return reconstructPath(cameFrom, endId, adjacency, nodes);
 
-    if (current === endId) return reconstructPath(cameFrom, endId, adjacency, nodes);
+        open.delete(current);
 
-    open.delete(current);
+        for (const { nodeId: neighbour, distance } of adjacency.get(current) ?? []) {
+            let weight = distance;
+            const n = nodes.get(neighbour);
 
-    for (const { nodeId: neighbour, distance } of adjacency.get(current) ?? []) {
-      const tentative = (gScore.get(current) ?? Infinity) + distance;
+            // 1. Check for flooding (your existing logic)
+            const isFlooded = floodPolygons.some(poly => isPointInPolygon([n.lon, n.lat], poly));
+            
+            // 2. NEW: Check if this node is too close to any coordinates we want to avoid
+            const isNearHazard = pointsToAvoid.some(hazard => {
+                // Reuse your haversineDistance function (it returns distance in meters)
+                const distanceToHazard = haversineDistance(n, hazard);
+                return distanceToHazard <= hazard.radius;
+            });
 
-      if (tentative < (gScore.get(neighbour) ?? Infinity)) {
-        cameFrom.set(neighbour, current);
-        gScore.set(neighbour, tentative);
-        fScore.set(neighbour, tentative + h(neighbour));
-        open.add(neighbour);
-      }
+            // 3. Apply penalty if it fails either check
+            if (isFlooded || isNearHazard) {
+                weight = distance * 1000; // Force the router to find a detour
+            }
+
+            const tentativeGScore = (gScore.get(current) ?? Infinity) + weight;
+
+            if (tentativeGScore < (gScore.get(neighbour) ?? Infinity)) {
+                cameFrom.set(neighbour, current);
+                gScore.set(neighbour, tentativeGScore);
+                fScore.set(neighbour, tentativeGScore + h(neighbour));
+                open.add(neighbour);
+            }
+        }
     }
-  }
-  console.log('No path found')
-  return null; // No path found
+    return null;
 }
 
 function reconstructPath(cameFrom, endId, adjacency, nodes) {
@@ -462,6 +578,38 @@ function isPointInPolygon(point, polygon) {
     return inside;
 }
 
+function routeWithWaypointAndAnimate(fromLat, fromLon, viaLat, viaLon, toLat, toLon, ambulanceUri) {
+  if (!routingGraph) return console.warn("Routing graph not ready");
+
+  const { nodes, adjacency } = routingGraph;
+
+  // 1. Find the nearest network nodes for all three points
+  const startId    = nearestNode(nodes, fromLat, fromLon);
+  const waypointId = nearestNode(nodes, viaLat, viaLon);
+  const endId      = nearestNode(nodes, toLat, toLon);
+
+  // 2. Calculate Leg 1: Start -> Waypoint
+  const leg1 = astar(adjacency, nodes, startId, waypointId);
+  if (!leg1) {
+    console.warn("No route found from Start to the Waypoint");
+    return null;
+  }
+
+  // 3. Calculate Leg 2: Waypoint -> End
+  const leg2 = astar(adjacency, nodes, waypointId, endId);
+  if (!leg2) {
+    console.warn("No route found from Waypoint to Destination");
+    return null;
+  }
+
+  // 4. Stitch the paths together
+  // We use .slice(1) on leg2 so we don't repeat the waypoint coordinate twice
+  const fullRoute = leg1.concat(leg2.slice(1));
+
+  // 5. Send the combined route to your existing animation function
+  return animateVehicle(viewer, fullRoute, ambulanceUri);
+}
+
 
 let currentVehicle = null; // We store the vehicle entity here
 
@@ -503,17 +651,26 @@ async function setupDashboard() {
     document.getElementById('btn-spawn').onclick = () => {
     if (currentVehicle) viewer.entities.remove(currentVehicle);
 
+    // 1. Pick a random Start and End POI
     const [start, end] = getRandomN(poiMap, 2);
     
-    // Pass the coordinates to your routing logic
-    const { nodes, adjacency } = routingGraph;
-    const startId = nearestNode(nodes, start.latitude, start.longitude);
-    const endId   = nearestNode(nodes, end.latitude, end.longitude);
-    const route   = astar(adjacency, nodes, startId, endId);
+    // 2. Define the fixed programmatic waypoint
+    const fixedWaypoint = {
+        latitude: 55.8642,  // Set whatever coordinates you need the vehicle
+        longitude: -4.2518 // to travel through automatically
+    };
 
-    if (route) {
-        // Now passing the ambulanceUri here
-        currentVehicle = animateVehicle(viewer, route, ambulanceUri);
+    console.log(`Routing: ${start.name} ➔ Checkpoint ➔ ${end.name}`);
+
+    // 3. Use the chained routing function to calculate the full path
+    currentVehicle = routeWithWaypointAndAnimate(
+        start.latitude, start.longitude,         // Leg 1 Start
+        fixedWaypoint.latitude, fixedWaypoint.longitude, // Waypoint/Checkpoint
+        end.latitude, end.longitude,              // Leg 2 Destination
+        ambulanceUri
+    );
+    
+    if (currentVehicle) {
         zoomVehicleBtn.disabled = false;
         stopTrackBtn.disabled = false;
     }
@@ -540,18 +697,44 @@ async function setupDashboard() {
         
         console.log("Camera tracking detached.");
     };
+
+    document.getElementById('btn-scenario').onclick = () => {
+      if (currentVehicle) viewer.entities.remove(currentVehicle);
+      
+      // Grab a random starting POI and destination POI
+      const [start, end] = getRandomN(poiMap, 2);
+      
+      console.log(`Initiating Mission: ${start.name} ➔ Destination: ${end.name}`);
+      
+      // Run our new macro script
+      currentVehicle = runEmergencyChargingScenario(
+          start.latitude, start.longitude, 
+          end.latitude, end.longitude, 
+          ambulanceUri
+      );
+    
+      if (currentVehicle) {
+          zoomVehicleBtn.disabled = false;
+          stopTrackBtn.disabled = false;
+      }
+};
 }
 
 // Call the setup
 setupDashboard();
 
 // get some pois
-fetchPoIs(5)
+fetchPoIs(2)
 
 // this needs to be a button and the coordinates need to be dynamic
 // routeAndAnimate(55.8609, -4.2514, 55.8580, -4.2572);
 
 routeAndAnimate(55.8453095, -4.2554813, 55.8580, -4.2572)
+
+
+function cesium_animate(){
+
+}
 
 
 

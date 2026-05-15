@@ -47,15 +47,35 @@
         <p><strong>Locations</strong></p>
     </div>
 
+    <!-- <hr>
+
+    <div id="flooding-links">
+        <p><strong>Flooding Areas</strong></p>
+    </div> -->
+
     <hr>
 
     <!-- Global actions -->
     <div id="global-actions">
         <p><strong>Vehicle Actions</strong></p>
         <button id="btn-spawn" style="width: 100%; margin-bottom: 5px;">Spawn Random Route</button>
-        <button id="btn-zoom-vehicle" style="width: 100%;" disabled>Track Vehicle</button>
+        <button id="btn-zoom-vehicle" style="width: 100%; margin-bottom: 5px;" disabled>Track Vehicle</button>
         <button id="btn-stop-tracking" style="width: 100%;" enabled>Stop Tracking</button>
     </div>
+
+    <hr>
+
+    <div id="flood-warnings" style="margin-top: 10px; display: none;">
+        <hr>
+        <p style="color: #d9534f;"><strong>Hazards Avoided on Route:</strong></p>
+        <div id="flood-buttons-container"></div>
+    </div>
+
+    <hr>
+
+    <button id="btn-scenario" style="width: 100%; margin-top: 5px; background: #ff9900; color: white; font-weight: bold;">
+        Run Battery Low Scenario
+    </button>
 </div>
     <!-- Change this much later -->
     <script type="module" src="/src/cesium.js"></script> 

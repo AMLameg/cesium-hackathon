@@ -7,13 +7,6 @@
     "description": "A stunning 12th-century gothic cathedral."
   },
   {
-    "name": "The Necropolis",
-    "latitude": 55.8625,
-    "longitude": -4.2311,
-    "category": "Historic",
-    "description": "A Victorian cemetery with views over the city."
-  },
-  {
     "name": "George Square",
     "latitude": 55.8611,
     "longitude": -4.2503,
@@ -28,46 +21,11 @@
     "description": "Iconic Hogwarts-style main building and cloisters."
   },
   {
-    "name": "People's Palace",
-    "latitude": 55.8511,
-    "longitude": -4.2372,
-    "category": "Historic",
-    "description": "Social history museum located in Glasgow Green."
-  },
-  {
     "name": "Kelvingrove Museum",
     "latitude": 55.8686,
     "longitude": -4.2906,
     "category": "Museum",
     "description": "World-class art and natural history museum."
-  },
-  {
-    "name": "Riverside Museum",
-    "latitude": 55.8651,
-    "longitude": -4.3061,
-    "category": "Museum",
-    "description": "Zaha Hadid-designed transport museum."
-  },
-  {
-    "name": "Gallery of Modern Art (GoMA)",
-    "latitude": 55.8601,
-    "longitude": -4.2519,
-    "category": "Museum",
-    "description": "Gallery of Modern Art in the city center."
-  },
-  {
-    "name": "Burrell Collection",
-    "latitude": 55.8311,
-    "longitude": -4.3072,
-    "category": "Museum",
-    "description": "A massive collection of art and antiquities."
-  },
-  {
-    "name": "Pollok House",
-    "latitude": 55.8285,
-    "longitude": -4.3186,
-    "category": "Museum",
-    "description": "Grand country house within Pollok Country Park."
   },
   {
     "name": "Glasgow Science Centre",
