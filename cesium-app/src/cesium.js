@@ -1,5 +1,6 @@
 import { Viewer, GeoJsonDataSource, Color } from 'cesium';
 import * as Cesium from "cesium";
+import * as Helpers from "./Helpers/index.js";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 
 Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZjRiNTQ2Ny1jN2M4LTRmZWEtODFkOS0wNzRlZjFjZDY0MGIiLCJpZCI6MzY4NzQzLCJzdWIiOiJBbmRyZXdHb29kc2VsbDIiLCJpc3MiOiJodHRwczovL2lvbi5jZXNpdW0uY29tIiwiYXVkIjoiVW50aXRsZWQiLCJpYXQiOjE3Nzg1OTYyMTN9.2SqfQ7XKDfelcFMfD5avwpw34-tNXhqxvNCQsN7Pghc';
@@ -12,6 +13,8 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   geocoder: Cesium.IonGeocodeProviderType.GOOGLE,
   globe: false,
 });
+
+Helpers.setViewer(viewer)
 
 // Enable sky/atmosphere rendering
 viewer.scene.skyAtmosphere.show = true;
@@ -137,25 +140,24 @@ rows.forEach((row) => {
 
     chargersList.push({ lat, lon, id, power });
 
-    viewer.entities.add({
-      name: `Charger: ${id}`,
-      position: Cesium.Cartesian3.fromDegrees(lon, lat),
-      point: {
-        pixelSize: 8,
-        color: Cesium.Color.ORANGE,
-        outlineColor: Cesium.Color.WHITE,
-        outlineWidth: 2,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
-      },
-
-      description: `
-        <table class="cesium-infoBox-defaultTable">
-          <tr><th>Power</th><td>${power} kW</td></tr>
-          <tr><th>Connector ID</th><td>${connectorId}</td></tr>
-        </table>
-      `
+    Helpers.Window.create({
+        title: `Charging Status: ${id}`,
+        type: "url",
+        content:
+          "https://grafana.imic.lt/dashboard/snapshot/1Q2uiBJFtAzL1ldGHSoNbx6v9TSSNxMq",
+        marker: {
+          coordinates: {
+            longitude: lon,
+            latitude: lat,
+            height: 0,
+          },
+          color: "#cfca3a",
+          style: "car",
+          showWindowWhen: "markerPressed",
+        },
+      });
     });
-  });
+  
 console.log(chargersList)
 // ai-gen code for graph building
 const response = await fetch('../public/glasgow.geojson');
@@ -306,41 +308,41 @@ function runEmergencyChargingScenario(fromLat, fromLon, toLat, toLon, ambulanceU
     if (!routingGraph) return console.warn("Routing graph not ready");
     const { nodes, adjacency } = routingGraph;
 
-    // 1. "Oh no! Low battery!" -> Find the nearest charger to the starting position
+    // 1. Dynamic Waypoint: Find the nearest charger to the starting point
     const charger = findClosestCharger(fromLat, fromLon);
     if (!charger) {
         console.warn("No charging stations loaded in memory.");
         return null;
     }
-    console.log(`Low Battery Event: Diverting to Charger ${charger.id} first.`);
+    console.log(`Low Battery Event: Selected Charger ${charger.id} as the waypoint.`);
 
-    // 2. Identify all network node IDs
+    // 2. Identify the network node IDs
     const startNodeId   = nearestNode(nodes, fromLat, fromLon);
     const chargerNodeId = nearestNode(nodes, charger.lat, charger.lon);
     const endNodeId     = nearestNode(nodes, toLat, toLon);
 
-    // 3. Leg 1: Travel from Point A to Charger (Avoiding Floods)
+    // 3. Leg 1: Start ➔ Charger (Respects global floodPolygons and pointsToAvoid)
     const leg1 = astar(adjacency, nodes, startNodeId, chargerNodeId);
     if (!leg1) {
         console.warn("Could not find a flood-safe path to the charging station.");
         return null;
     }
 
-    // 4. Leg 2: Resume Journey from Charger to Point B (Avoiding Floods)
+    // 4. Leg 2: Charger ➔ Destination (Respects global floodPolygons and pointsToAvoid)
     const leg2 = astar(adjacency, nodes, chargerNodeId, endNodeId);
     if (!leg2) {
         console.warn("Could not find a flood-safe path from the charger to destination.");
         return null;
     }
 
-    // 5. Stitch the journey together 
-    // (.slice(1) removes the duplicate waypoint node where the legs connect)
+    // 5. Stitch the path together (drops duplicate node where legs meet)
     const fullScenarioPath = leg1.concat(leg2.slice(1));
 
-    console.log("Route calculated successfully. Dispatching ambulance around flood parameters.");
-    
-    // 6. Send the stitched road matrix to your animation layer
-    return animateVehicle(viewer, fullScenarioPath, ambulanceUri);
+    // 6. Identify exactly which index the charger is at for the visual stop
+    const chargerIndex = leg1.length - 1; 
+
+    // 7. Hand off to the updated animation engine with the delay index and 5-second hold time
+    return animateVehicle(viewer, fullScenarioPath, ambulanceUri, 13.9, chargerIndex, 10);
 }
 
 // Haversine distance in metres between two {lat,lon} points
@@ -442,11 +444,12 @@ function nearestNode(nodes, lat, lon) {
   return bestId;
 }
 
-function animateVehicle(viewer, routeCoords, modelUri, speedMetresPerSecond = 13.9) {
+function animateVehicle(viewer, routeCoords, modelUri, speedMetresPerSecond = 13.9, delayIndex = -1, delayDuration = 10) {
   const start = Cesium.JulianDate.now();
   const positions = new Cesium.SampledPositionProperty();
+  
   positions.setInterpolationOptions({
-    interpolationAlgorithm: Cesium.LagrangePolynomialApproximation,
+    interpolationAlgorithm: Cesium.HermitePolynomialApproximation,
     interpolationDegree: 2,
   });
 
@@ -456,66 +459,92 @@ function animateVehicle(viewer, routeCoords, modelUri, speedMetresPerSecond = 13
     if (i > 0) {
       const [lon1, lat1] = routeCoords[i - 1];
       const [lon2, lat2] = routeCoords[i];
-      elapsed += haversineDistance({ lat: lat1, lon: lon1 }, { lat: lat2, lon: lon2 })
+      elapsed += haversineDistance({ lat: lat1, lon: lon1 }, { lat: lat2, lon: lon2 }) 
                  / speedMetresPerSecond;
     }
 
     const time = Cesium.JulianDate.addSeconds(start, elapsed, new Cesium.JulianDate());
-    const pos  = Cesium.Cartesian3.fromDegrees(routeCoords[i][0], routeCoords[i][1], 0);
+    const currLon = routeCoords[i][0];
+    const currLat = routeCoords[i][1];
+    const pos = Cesium.Cartesian3.fromDegrees(currLon, currLat, 0);
+    
     positions.addSample(time, pos);
+
+    // THE PAUSE LOGIC
+    if (i === delayIndex) {
+      const chargeStartTime = time.clone();
+      
+      elapsed += delayDuration; // Advance the clock by 10 seconds
+      const chargeEndTime = Cesium.JulianDate.addSeconds(start, elapsed, new Cesium.JulianDate());
+      
+      // THE MICRO-NUDGE: Move 0.1% towards the next node over 10 seconds
+      // This prevents the interpolator from ignoring the stop or breaking the vehicle heading
+      let holdPos = pos;
+      if (i < routeCoords.length - 1) {
+          const nextLon = routeCoords[i + 1][0];
+          const nextLat = routeCoords[i + 1][1];
+          const nudgeLon = currLon + (nextLon - currLon) * 0.001; 
+          const nudgeLat = currLat + (nextLat - currLat) * 0.001;
+          holdPos = Cesium.Cartesian3.fromDegrees(nudgeLon, nudgeLat, 0);
+      }
+      
+      // Add the delayed sample
+      positions.addSample(chargeEndTime, holdPos);
+
+      // Create the Visual Charging Indicator
+      viewer.entities.add({
+        name: "Charging Aura",
+        position: pos,
+        availability: new Cesium.TimeIntervalCollection([
+          new Cesium.TimeInterval({ start: chargeStartTime, stop: chargeEndTime })
+        ]),
+        label: {
+          text: "CHARGING...",
+          font: "bold 16px sans-serif",
+          fillColor: Cesium.Color.LIME,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(0, -50), 
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY 
+        },
+        ellipse: {
+          semiMinorAxis: 20, 
+          semiMajorAxis: 20,
+          material: Cesium.Color.LIME.withAlpha(0.4), 
+          outline: true,
+          outlineColor: Cesium.Color.LIME,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+        }
+      });
+    }
   }
 
   const end = Cesium.JulianDate.addSeconds(start, elapsed, new Cesium.JulianDate());
 
-  const flipRotation = Cesium.Quaternion.fromAxisAngle(
-    Cesium.Cartesian3.UNIT_Z, 
-    Cesium.Math.toRadians(180)
-);
-
+  const flipRotation = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_Z, Cesium.Math.toRadians(180));
+  
   const vehicle = viewer.entities.add({
-    availability: new Cesium.TimeIntervalCollection([
-      new Cesium.TimeInterval({ start, stop: end }),
-    ]),
+    availability: new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({ start, stop: end })]),
     position: positions,
     orientation: new Cesium.CallbackProperty((time, result) => {
         const velocityOrientation = new Cesium.VelocityOrientationProperty(positions).getValue(time);
         if (!velocityOrientation) return result;
-        
-        // Multiply the auto-heading by our 180-degree flip
         return Cesium.Quaternion.multiply(velocityOrientation, flipRotation, new Cesium.Quaternion());
     }, false),
-    
-    model: {
-      uri: modelUri,
-      minimumPixelSize: 128, // Keeps it visible when zooming out
-      maximumScale: 20000,
-      // Ensures the wheels stay on the 3D tiles/ground
-      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND 
-    }
+    model: { uri: modelUri, minimumPixelSize: 128, maximumScale: 20000, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND }
   });
 
-  // Drive the clock
-  viewer.clock.startTime    = start;
-  viewer.clock.stopTime     = end;
-  viewer.clock.currentTime  = Cesium.JulianDate.clone(start);
-  viewer.clock.multiplier   = 1;
-  viewer.clock.clockRange   = Cesium.ClockRange.LOOP_STOP;
+  viewer.clock.startTime = start;
+  viewer.clock.stopTime = end;
+  viewer.clock.currentTime = Cesium.JulianDate.clone(start);
   viewer.clock.shouldAnimate = true;
   viewer.timeline?.zoomTo(start, end);
 
-  // Fly to the vehicle first, then lock on
-  viewer.flyTo(vehicle, {
-    offset: new Cesium.HeadingPitchRange(
-      Cesium.Math.toRadians(0),   // heading: match vehicle direction
-      Cesium.Math.toRadians(-45), // pitch: looking down at 45°
-      120                         // range: 120m behind/above
-    ),
-  }).then(() => {
-    // Lock camera to vehicle — it will follow automatically from here
-    viewer.trackedEntity = vehicle;
-  });
+  viewer.flyTo(vehicle, { offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 120) })
+        .then(() => { viewer.trackedEntity = vehicle; });
 
-  // Unlock camera when the vehicle finishes its route
   const removeListener = viewer.clock.onTick.addEventListener(() => {
     if (Cesium.JulianDate.compare(viewer.clock.currentTime, end) >= 0) {
       viewer.trackedEntity = undefined;
@@ -651,22 +680,15 @@ async function setupDashboard() {
     document.getElementById('btn-spawn').onclick = () => {
     if (currentVehicle) viewer.entities.remove(currentVehicle);
 
-    // 1. Pick a random Start and End POI
+    // 1. Pick a random Start and End POI from your map data
     const [start, end] = getRandomN(poiMap, 2);
     
-    // 2. Define the fixed programmatic waypoint
-    const fixedWaypoint = {
-        latitude: 55.8642,  // Set whatever coordinates you need the vehicle
-        longitude: -4.2518 // to travel through automatically
-    };
+    console.log(`Mission Initiated: ${start.name} ➔ [EV Charger Detour] ➔ ${end.name}`);
 
-    console.log(`Routing: ${start.name} ➔ Checkpoint ➔ ${end.name}`);
-
-    // 3. Use the chained routing function to calculate the full path
-    currentVehicle = routeWithWaypointAndAnimate(
-        start.latitude, start.longitude,         // Leg 1 Start
-        fixedWaypoint.latitude, fixedWaypoint.longitude, // Waypoint/Checkpoint
-        end.latitude, end.longitude,              // Leg 2 Destination
+    // 2. Trigger the scenario function (it automatically handles the charger detour and 5s stop)
+    currentVehicle = runEmergencyChargingScenario(
+        start.latitude, start.longitude, 
+        end.latitude, end.longitude, 
         ambulanceUri
     );
     
@@ -729,12 +751,7 @@ fetchPoIs(2)
 // this needs to be a button and the coordinates need to be dynamic
 // routeAndAnimate(55.8609, -4.2514, 55.8580, -4.2572);
 
-routeAndAnimate(55.8453095, -4.2554813, 55.8580, -4.2572)
-
-
-function cesium_animate(){
-
-}
+// routeAndAnimate(55.8453095, -4.2554813, 55.8580, -4.2572)
 
 
 
